@@ -13,30 +13,6 @@
 #include <assert.h>
 #include "../src/String.h"
 
-#if 0
-static void url(struct String *const this) {
-	StringTrim(this), StringTransform(this, "<a href = \"%s\">%s</a>");
-}
-static void cite(struct String *const this) {
-	StringTrim(this), StringTransform(this,
-		"<a href = \"https://scholar.google.ca/scholar?q=%s\">%s</a>");
-}
-/** @implements	StringAction */
-static void em(struct String *const this) { StringTransform(this, "<em>%s</em>"); }
-
-/*static const struct StringPattern tpattern[] = {
-	{ "\\url{",  "}", &url },
-	{ "\\cite{", "}", &cite },
-	{ "{",       "}", &em }
-};
-static const size_t tpattern_size = sizeof tpattern / sizeof *tpattern;*/
-
-/** @implements	StringPredicate */
-static int is_delim(const char *const str, const char *p) {
-	return *++p == '/' || 0 == str ? 0 : -1;
-}
-#endif
-
 static void verify(const struct String *const string, const size_t bytes,
 	const size_t codep) {
 	size_t b, c;
@@ -50,6 +26,23 @@ static void verify(const struct String *const string, const size_t bytes,
 	assert(!StringHasContent(string) == !bytes);
 }
 
+static void test_regex(void) {
+	struct Regex *re_null = Regex(0), *re_empty = Regex(""), *re;
+	const char *str1 = "hellohithere", *str2 = "thsdoesnot", *m;
+	re = Regex("hi");
+	assert(!re_null && !re_empty && re);
+
+	if((m = RegexMatch(re, str1))) printf("matches <%s> <%s>\n", str1, m);
+	else assert(0);
+	printf("str2: <%s>\n", str2);
+	if((m = RegexMatch(re, str2)))
+		printf("matches <%s> <%s>\n", str2, m), assert(0);
+
+	Regex_(&re_null);
+	Regex_(&re);
+	assert(!re_null && !re_empty && !re);
+}
+
 /** The is a test of String. */
 int main(void) {
 	const char *bit1x30 = "all your base are belong to us",
@@ -58,7 +51,7 @@ int main(void) {
 		*bit4x4 = "𐑫𐑣𐑟𐐥";
 	struct String s = { 0, 0, { 0, 0 } }, t;
 	const char *a, *b;
-	size_t bytes = 0, codep = 0;
+	size_t bytes = 0, codep = 0, i;
 
 	printf("Testing:\n");
 
@@ -76,6 +69,40 @@ int main(void) {
 	a = StringGet(&s);
 	assert(a && !strcmp(a, "") && StringLength(&s) == 0
 		&& !StringHasContent(&s));
+
+	StringClear(&s);
+	for(i = 0; i < 300; i++) StringPrintCat(&s, "%c", '0' + i % 10);
+	printf("t: \"%s\"\n", StringGet(&s));
+	i = StringLength(&s);
+	assert(i == 300);
+
+	printf("StringNCat:\n");
+	StringClear(&t);
+	StringNCat(&t, "TestString", (size_t)4);
+	printf("String: %s\n", StringGet(&t));
+	assert((a = StringGet(&t)) && !strcmp(b = "Test", a));
+	printf("StringTransform:\n");
+	StringTransform(&t, "\\url{%s%%%s} yo {YO}");
+	printf("String: %s\n", StringGet(&t));
+	assert((a = StringGet(&t))
+		&& !strcmp(b = "\\url{Test%Test} yo {YO}", a));
+
+	printf("StringBetweenCat:\n");
+	{
+		const char *const fn = "foo/bar/baz/qux/quxx";
+		const char *s0, *s1;
+		StringClear(&t);
+		s0 = strchr(fn + 1, '/');
+		s1 = strchr(s0 + 1, '/');
+		StringBetweenCat(&t, s0, s1);
+		assert((a = StringGet(&t)) && !strcmp(b = "/bar/", a));
+		s0 = strchr(s1 + 1, '/');
+		s1 = strchr(s0 + 1, '/');
+		StringBetweenCat(&t, s0, s1);
+		assert((a = StringGet(&t)) && !strcmp(b = "/bar//qux/", a));
+		printf("String: %s\n", StringGet(&t));
+		StringClear(&t);
+	}
 
 	/* @fixme This is a pitiful test. */
 	StringCopy(&s, bit3x7);
@@ -109,105 +136,7 @@ int main(void) {
 	String_(&s);
 	verify(&s, 0, 0);
 
-	/*
-	void String_(struct String *const);
-	void String(struct String *const);
-	struct String *StringClear(struct String *const);
-	const char *StringGet(const struct String *const);
-	size_t StringLength(const struct String *const);
-	size_t StringCodePoints(const struct String *const);
-	int StringHasContent(const struct String *const);
-	struct String *StringRightTrim(struct String *const);
-	struct String *StringTrim(struct String *const);
-	struct String *StringCopy(struct String *const, const char *const);
-	struct String *StringCat(struct String *const, const char *const);
-	struct String *StringNCat(struct String *const, const char *const,const size_t);
-	struct String *StringBetweenCat(struct String *const, const char *const,
-									const char *const);
-	struct String *StringPrintCat(struct String *const, const char *const, ...);
-	struct String *StringTransform(struct String *const, const char *);
-	*/
-
-	/*printf("StringNCat:\n");
-	StringNCat(t, "TestString", (size_t)4);
-	printf("String: %s\n", StringGet(t));
-	assert((str = StringGet(t)) && !strcmp(sup = "Test", str));
-
-	printf("StringTransform:\n");
-	StringTransform(t, "\\url{%s%%%s} yo {YO}");
-	printf("String: %s\n", StringGet(t));
-	assert((str = StringGet(t)) && !strcmp(sup = "\\url{Test%Test} yo {YO}",str));
-
-	printf("StringMatch:\n");
-	StringMatch(t, tpattern, tpattern_size);
-	printf("String: %s\n", StringGet(t));
-	assert((str = StringGet(t)) && !strcmp(sup
-		= "<a href = \"Test%Test\">Test%Test</a> yo <em>YO</em>", str));
-	StringClear(t);
-
-	printf("StringBetweenCat:\n");
-	s0 = strchr(fn + 1, '/');
-	s1 = strchr(s0 + 1, '/');
-	StringBetweenCat(t, s0, s1);
-	assert((str = StringGet(t)) && !strcmp(sup = "/neil/", str));
-	s0 = strchr(s1 + 1, '/');
-	s1 = strchr(s0 + 1, '/');
-	StringBetweenCat(t, s0, s1);
-	assert((str = StringGet(t)) && !strcmp(sup = "/neil//Common/", str));
-	printf("String: %s\n", StringGet(t));
-	StringClear(t);
-
-	printf("StringSep:\n");
-	StringCat(t, "/foo///bar/qux//xxx");
-	printf("String: '%s'\n", StringGet(t));
-	assert(t);
-	s = 0;
-	printf("entering\n");
-	while((sep = StringSep(&t, "/", &is_delim))) {
-		printf("here\n");
-		printf("StringSep: '%s' '%s'\n", StringGet(sep), StringGet(t));
-		switch(s++) {
-			case 0:
-				assert((str = StringGet(sep)) && !strcmp(sup = "", str));
-				break;
-			case 1:
-				assert((str = StringGet(sep)) && !strcmp(sup = "foo//", str));
-				break;
-			case 2:
-				assert((str = StringGet(sep)) && !strcmp(sup = "bar", str));
-				break;
-			case 3:
-				assert((str = StringGet(sep)) && !strcmp(sup = "qux/", str));
-				break;
-			case 4:
-				assert((str = StringGet(sep)) && !strcmp(sup = "xxx", str));
-				break;
-			default:
-				assert((str = StringGet(sep), 0));
-				break;
-		}
-		String_(&sep);
-	}
-	assert(!t);
-
-	t = String();
-	StringCat(t, "words separated by spaces -- and, punctuation!!!");
-	printf("original: \"%s\"\n", StringGet(t));
-	StringCat(t, "word!!!");
-	printf("modified: \"%s\"\n", StringGet(t));
-	s = 0;
-	while((sep = StringSep(&t, " .,;:!-", 0))) {
-		s++;
-		printf("token => \"%s\"\n", StringGet(sep));
-		String_(&sep);
-	}
-	assert(s == 16 && !t);
-
-	t = String();
-	for(i = 0; i < 300; i++) StringPrintCat(t, "%c", '0' + i % 10);
-	printf("t: \"%s\"\n", StringGet(t));
-	s = StringLength(t);
-	assert(s == 300);*/
+	test_regex();
 
 	return EXIT_SUCCESS;
 }

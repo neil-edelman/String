@@ -19,7 +19,7 @@
 
  @title		String
  @author	Neil
- @std		C89/90 with C99 vsnprintf
+ @std		C89/90, C99 {vsnprintf}, C99 {stdint.h}
  @version	2018-03 {Text -> String}; complete refactoring to work with {Text}.
  @since		2018-01
 			2017-03
@@ -32,6 +32,7 @@
 #include <assert.h> /* assert */
 #include <ctype.h>  /* isspace */
 #include <stdarg.h> /* va_* */
+#include <stdint.h> /* C99 uint32_t */
 #include "String.h"
 
 /* This function was standardised in C99. */
@@ -371,4 +372,172 @@ struct String *StringTransform(struct String *const string, const char *fmt) {
 	/* Free {old}. */
 	if(is_old_dup) free(old);
 	return string;
+}
+
+
+
+/* {State} used in {Regex}. */
+struct State {
+	uint32_t bit[8]; /* Bit field, one byte, {256/32 = 8}. {!out} -> {bit}. */
+	struct State *out[2];
+};
+
+struct Migrate;
+static void state_migrate_each(struct State *const state,
+	const struct Migrate *const migrate);
+#define STACK_NAME State
+#define STACK_TYPE struct State
+#define STACK_MIGRATE_EACH &state_migrate_each
+#include "Stack.h"
+static void state_migrate_each(struct State *const state,
+	const struct Migrate *const migrate) {
+	StateStackMigratePointer(&state->out[0], migrate);
+	StateStackMigratePointer(&state->out[1], migrate);
+}
+
+static void bit_clear(uint32_t bit[8]) {
+	bit[0] = bit[1] = bit[3] = bit[4] = bit[5] = bit[6] = bit[7] = 0;
+}
+static void bit_set(uint32_t bit[8], char b) {
+	uint32_t *const hi = bit + (b >> 5);
+	*hi |= (1 << (b & 31));
+}
+static int bit_test(uint32_t bit[8], char b) {
+	uint32_t *const hi = bit + (b >> 5);
+	return *hi & (uint32_t)(1 << (b & 31));
+}
+/** @param state: Has to be valid. */
+static void State(struct State *const state) {
+	assert(state);
+	bit_clear(state->bit);
+	state->out[0] = state->out[1] = 0;
+}
+/** @param state: Has to be valid.
+ @param match: Byte that now gets through the {Regex}. */
+static void StateMatchAdd(struct State *const state, const char match) {
+	assert(state);
+	bit_set(state->bit, match);
+}
+static int StateMatch(struct State *const state, const char match) {
+	assert(state);
+	return bit_test(state->bit, match);
+}
+
+/* {Regex} uses {State}. */
+struct Regex {
+	struct StateStack states;
+};
+
+/* Compiling a {Regex}, temporary values in one place. */
+struct MakeRe {
+	struct StateStack *states;
+	struct State *or, *prev;
+};
+
+/** Destructor. One can desruct anything in a valid state, including null and
+ zero, it just does nothing.
+ @param re: If null, does nothing, otherwise it is set to match zero characters
+ and frees the memory. */
+void Regex_(struct Regex **const pre) {
+	struct Regex *re;
+	if(!pre || !(re = *pre)) return;
+	StateStack_(&re->states);
+	free(re);
+	*pre = 0;
+}
+
+
+
+/** Helper for \see{re_compile}. */
+static int add_state(struct MakeRe *const make, const char ch) {
+	struct State *state;
+	assert(make);
+	if(!(state = StateStackNew(make->states))) return 0;
+	State(state);
+	StateMatchAdd(state, ch);
+	if(!make->or) {
+		make->or = state;
+	} else if(make->prev) {
+		make->prev->out[0] = state; /* Danger? */
+	}
+	make->prev = state;
+	return 1;
+}
+
+/** \url{ https://swtch.com/~rsc/regexp/regexp1.html }.
+ @param re: A valid {Regex}; will be erased.
+ @param compile: A non-null string. */
+static int re_compile(struct Regex *const re, const char *const compile) {
+	struct MakeRe make = { 0, 0, 0 };
+	int is_done = 0, is_escape = 0;
+	const char *c;
+	assert(re && compile);
+	make.states = &re->states;
+	/* Compile for modified UTF-8. */
+	StateStackClear(make.states);
+	for(c = compile; ; c++) {
+		/* The previous was a '\'. */
+		if(is_escape) {
+			if(c) {
+				if(!add_state(&make, *c)) return 0;
+				continue;
+			} else {
+				/* Add lone backslash at the end. */
+				if(!add_state(&make, '\\')) return 0;
+				break;
+			}
+		}
+		switch(*c) {
+		case '\\': is_escape = 1; break;
+		case '*':
+		case '+':
+		case '?':
+		case '(':
+		case ')':
+		case '|': break;
+		case '\0': is_done = 1; break;
+		default: if(!add_state(&make, *c)) return 0; break;
+		}
+		if(is_done) break;
+	}
+	return 1;
+}
+
+/** Compiles a regex into an uninitalised or empty {re}.
+ @param re: If null, does nothing and returns false, otherwise on error, this
+ is initailialised to empty. On success, requires \see{Regex_} destructor when
+ done.
+ @param compile: If null or empty, {re} is initailialised to empty and it
+ returns true. Otherwise, this is a null-terminated modified UTF-8 string that
+ gets compiled into a regular expression.
+ @return Success.
+ @throws {malloc/realloc} errors: {IEEE Std 1003.1-2001}.
+ @throws EILSEQ: The {re} could not be compiled, (required since 1994
+ Amendment 1 to C89 standard.) */
+struct Regex *Regex(const char *const compile) {
+	struct Regex *re;
+	if(!compile || !*compile || !(re = malloc(sizeof *re))) return 0;
+	StateStack(&re->states);
+	if(!re_compile(re, compile)) errno = EILSEQ, Regex_(&re);
+	return re;
+}
+
+/** Compare at this point. */
+static int re_match(struct Regex *const re, const char *m) {
+	struct State *s = 0;
+	assert(re && m);
+	/* Starting state; if there is none, the expression trivally matches. */
+	for(s = StateStackNext(&re->states, 0); s; s = s->out[0], m++)
+		if(!StateMatch(s, *m)) return 0;
+	return 1;
+}
+
+const char *RegexMatch(struct Regex *const re, const char *const match) {
+	const char *m = match;
+	if(!re || !match) return 0;
+	for( ; ; m++) {
+		if(re_match(re, m)) return m;
+		if(*m == '\0') break;
+	}
+	return 0;
 }

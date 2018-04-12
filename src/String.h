@@ -2,10 +2,14 @@
 #define STRING_H
 
 /** Struct to hold information about a string. */
+struct String;
 struct String {
 	char *text;
 	size_t length, capacity[2];
 };
+
+/** Struct to hold regular expression. */
+struct Regex;
 
 void String_(struct String *const);
 void String(struct String *const);
@@ -23,5 +27,9 @@ struct String *StringBetweenCat(struct String *const, const char *const,
 	const char *const);
 struct String *StringPrintCat(struct String *const, const char *const, ...);
 struct String *StringTransform(struct String *const, const char *);
+
+void Regex_(struct Regex **const pre);
+struct Regex *Regex(const char *const compile);
+const char *RegexMatch(struct Regex *const re, const char *const match);
 
 #endif /* guards --> */
