@@ -24,7 +24,7 @@
  @since		2018-01
 			2017-03
  @fixme uhh, {StringByteOffsetCodePoints()}?
- @fixme work with int instead of char, obverously. */
+ @fixme work with int instead of char, obviously. */
 
 #include <stdlib.h> /* malloc realloc free */
 #include <string.h> /* strlen memmove memcpy memchr */
@@ -398,6 +398,10 @@ static void state_migrate_each(struct State *const state,
 static void bit_clear(uint32_t bit[8]) {
 	bit[0] = bit[1] = bit[3] = bit[4] = bit[5] = bit[6] = bit[7] = 0;
 }
+static void bit_invert(uint32_t bit[8]) {
+	bit[0] = ~bit[0], bit[1] = ~bit[1], bit[2] = ~bit[2], bit[3] = ~bit[3],
+	bit[4] = ~bit[4], bit[5] = ~bit[5], bit[6] = ~bit[6], bit[7] = ~bit[7];
+}
 static void bit_set(uint32_t bit[8], char b) {
 	uint32_t *const hi = bit + (b >> 5);
 	*hi |= (1 << (b & 31));
@@ -406,18 +410,25 @@ static int bit_test(uint32_t bit[8], char b) {
 	uint32_t *const hi = bit + (b >> 5);
 	return *hi & (uint32_t)(1 << (b & 31));
 }
-/** @param state: Has to be valid. */
+/** Initialises an empty {state}.
+ @param state: Has to be valid. */
 static void State(struct State *const state) {
 	assert(state);
 	bit_clear(state->bit);
 	state->out[0] = state->out[1] = 0;
 }
-/** @param state: Has to be valid.
- @param match: Byte that now gets through the {Regex}. */
+/** Adds {match} to state. */
 static void StateMatchAdd(struct State *const state, const char match) {
 	assert(state);
 	bit_set(state->bit, match);
 }
+/** Inverts the matches that will get though {state}.
+ @fixme UTF-8 does not do as expecected. */
+static void StateMatchInvert(struct State *const state) {
+	assert(state);
+	bit_invert(state->bit);
+}
+/** Tests {match} agaist {state}. */
 static int StateMatch(struct State *const state, const char match) {
 	assert(state);
 	return bit_test(state->bit, match);
@@ -433,20 +444,6 @@ struct MakeRe {
 	struct StateStack *states;
 	struct State *or, *prev;
 };
-
-/** Destructor. One can desruct anything in a valid state, including null and
- zero, it just does nothing.
- @param re: If null, does nothing, otherwise it is set to match zero characters
- and frees the memory. */
-void Regex_(struct Regex **const pre) {
-	struct Regex *re;
-	if(!pre || !(re = *pre)) return;
-	StateStack_(&re->states);
-	free(re);
-	*pre = 0;
-}
-
-
 
 /** Helper for \see{re_compile}. */
 static int add_state(struct MakeRe *const make, const char ch) {
@@ -503,6 +500,18 @@ static int re_compile(struct Regex *const re, const char *const compile) {
 	return 1;
 }
 
+/** Destructor. One can desruct anything in a valid state, including null and
+ zero, it just does nothing.
+ @param re: If null, does nothing, otherwise it is set to match zero characters
+ and frees the memory. */
+void Regex_(struct Regex **const pre) {
+	struct Regex *re;
+	if(!pre || !(re = *pre)) return;
+	StateStack_(&re->states);
+	free(re);
+	*pre = 0;
+}
+
 /** Compiles a regex into an uninitalised or empty {re}.
  @param re: If null, does nothing and returns false, otherwise on error, this
  is initailialised to empty. On success, requires \see{Regex_} destructor when
@@ -532,6 +541,8 @@ static int re_match(struct Regex *const re, const char *m) {
 	return 1;
 }
 
+/** Match {re} to {match}.
+ @return The first match or null. */
 const char *RegexMatch(struct Regex *const re, const char *const match) {
 	const char *m = match;
 	if(!re || !match) return 0;
