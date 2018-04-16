@@ -394,7 +394,6 @@ static void state_migrate_each(struct State *const state,
 	StateStackMigratePointer(&state->out[0], migrate);
 	StateStackMigratePointer(&state->out[1], migrate);
 }
-
 static void bit_clear(uint32_t bit[8]) {
 	bit[0] = bit[1] = bit[3] = bit[4] = bit[5] = bit[6] = bit[7] = 0;
 }
@@ -422,17 +421,103 @@ static int StateMatch(struct State *const state, const char match) {
 	assert(state);
 	return bit_test(state->bit, match);
 }
-
 /* {Regex} uses {State}. */
 struct Regex {
 	struct StateStack states;
 };
 
-/* Compiling a {Regex}, temporary values in one place. */
+/* Temporary variable when compiling a {Regex}; indexes into {StateStack}. */
+struct Pair { size_t from, to; };
+#define STACK_NAME Pair
+#define STACK_TYPE struct Pair
+#include "Stack.h"
+
+/* All wrapped up one one object for convenience. */
 struct MakeRe {
 	struct StateStack *states;
-	struct State *or, *prev;
+	struct PairStack pairs;
+	int is_in_text;
 };
+
+/** Helper for \see{re_compile}.
+ @throws ERANGE: Tried allocating more then can fit in {size_t}.
+ @throws {realloc} errors: {IEEE Std 1003.1-2001}. */
+static int add_state(struct MakeRe *const make, const char byte) {
+	struct State *const state = StateStackNew(make->states);
+	assert(make);
+	/* Add the state. */
+	if(!state) return 0; /* {realloc} error. */
+	State(state);
+	StateMatchAdd(state, byte);
+	/* Add/update temporary pairs. */
+	if(make->is_in_text) {
+		/* We are currently in the pair. */
+		struct Pair *const pair = PairStackPeek(&make->pairs);
+		struct State *const last = StateStackGet(make->states, pair->to);
+		assert(pair && last && !last->out[0] && !last->out[1]);
+		last->out[0] = state;
+		pair->to = StateStackIndex(make->states, state);
+	} else {
+		/* Make a new pair. */
+		struct Pair *const pair = PairStackNew(&make->pairs);
+		if(!pair) return 0; /* {realloc} error. */
+		pair->from = pair->to = StateStackIndex(make->states, state);
+		make->is_in_text = 1;
+	}
+	return 1;
+}
+
+/** Helper for \see{re_compile}. */
+static void process_symbol(struct MakeRe *const make, const char byte) {
+	
+}
+
+/** Initialises {make} and clears {states}. */
+static void MakeRe(struct MakeRe *const make, struct StateStack *states) {
+	assert(make && states);
+	make->states = states;
+	PairStack(&make->pairs);
+	make->is_in_text = 0;
+	StateStackClear(states);
+}
+
+/** \url{ https://swtch.com/~rsc/regexp/regexp1.html }.
+ @param re: A valid {Regex}; will be erased.
+ @param compile: A non-null string. */
+static int re_compile(struct Regex *const re, const char *const compile) {
+	struct MakeRe make;
+	int is_done = 0, is_escape = 0;
+	const char *byte;
+	assert(re && compile);
+	MakeRe(&make, &re->states);
+	/* Compile char by char. */
+	for(byte = compile; ; byte++) {
+		/* The previous was a '\'. */
+		if(is_escape) {
+			if(byte) {
+				if(!add_state(&make, *byte)) return 0;
+				continue;
+			} else {
+				/* Add lone backslash at the end. */
+				if(!add_state(&make, '\\')) return 0;
+				break;
+			}
+		}
+		switch(*byte) {
+		case '\\': is_escape = 1; break;
+		case '*':
+		case '+':
+		case '?': process_symbol(&make, *byte); break;
+		case '(': make.is_in_text = 0;
+		case ')': break;
+		case '|': break;
+		case '\0': is_done = 1; break;
+		default: if(!add_state(&make, *byte)) return 0; break;
+		}
+		if(is_done) break;
+	}
+	return 1;
+}
 
 /** Destructor. One can desruct anything in a valid state, including null and
  zero, it just does nothing.
@@ -444,63 +529,6 @@ void Regex_(struct Regex **const pre) {
 	StateStack_(&re->states);
 	free(re);
 	*pre = 0;
-}
-
-
-
-/** Helper for \see{re_compile}. */
-static int add_state(struct MakeRe *const make, const char ch) {
-	struct State *state;
-	assert(make);
-	if(!(state = StateStackNew(make->states))) return 0;
-	State(state);
-	StateMatchAdd(state, ch);
-	if(!make->or) {
-		make->or = state;
-	} else if(make->prev) {
-		make->prev->out[0] = state; /* Danger? */
-	}
-	make->prev = state;
-	return 1;
-}
-
-/** \url{ https://swtch.com/~rsc/regexp/regexp1.html }.
- @param re: A valid {Regex}; will be erased.
- @param compile: A non-null string. */
-static int re_compile(struct Regex *const re, const char *const compile) {
-	struct MakeRe make = { 0, 0, 0 };
-	int is_done = 0, is_escape = 0;
-	const char *c;
-	assert(re && compile);
-	make.states = &re->states;
-	/* Compile for modified UTF-8. */
-	StateStackClear(make.states);
-	for(c = compile; ; c++) {
-		/* The previous was a '\'. */
-		if(is_escape) {
-			if(c) {
-				if(!add_state(&make, *c)) return 0;
-				continue;
-			} else {
-				/* Add lone backslash at the end. */
-				if(!add_state(&make, '\\')) return 0;
-				break;
-			}
-		}
-		switch(*c) {
-		case '\\': is_escape = 1; break;
-		case '*':
-		case '+':
-		case '?':
-		case '(':
-		case ')':
-		case '|': break;
-		case '\0': is_done = 1; break;
-		default: if(!add_state(&make, *c)) return 0; break;
-		}
-		if(is_done) break;
-	}
-	return 1;
 }
 
 /** Compiles a regex into an uninitalised or empty {re}.
