@@ -376,12 +376,30 @@ struct String *StringTransform(struct String *const string, const char *fmt) {
 
 
 
+#include <stdio.h>
+
+/*typedef int (*Match)(char *const, struct State *const);
+
+struct StateVt {
+	
+};
+
+struct State {
+	const Match *const match;
+};
+#define LIST_NAME State
+#define LIST_TYPE struct Match
+
+
+struct MatchString {
+
+};*/
+
 /* {State} used in {Regex}. */
 struct State {
 	uint32_t bit[8]; /* Bit field, one byte, {256/32 = 8}. {!out} -> {bit}. */
 	struct State *out[2];
 };
-
 struct Migrate;
 static void state_migrate_each(struct State *const state,
 	const struct Migrate *const migrate);
@@ -409,6 +427,7 @@ static int bit_test(uint32_t bit[8], char b) {
 	uint32_t *const hi = bit + (b >> 5);
 	return *hi & (uint32_t)(1 << (b & 31));
 }
+
 /** Initialises an empty {state}.
  @param state: Has to be valid. */
 static void State(struct State *const state) {
@@ -432,10 +451,6 @@ static int StateMatch(struct State *const state, const char match) {
 	assert(state);
 	return bit_test(state->bit, match);
 }
-/* {Regex} uses {State}. */
-struct Regex {
-	struct StateStack states;
-};
 
 /* Temporary variable when compiling a {Regex}; indexes into {StateStack}. */
 struct Pair { size_t from, to; };
@@ -475,22 +490,35 @@ static int add_state(struct MakeRe *const make, const char byte) {
 		pair->from = pair->to = StateStackIndex(make->states, state);
 		make->is_in_text = 1;
 	}
+	printf("%c", byte);
 	return 1;
 }
 
 /** Helper for \see{re_compile}. */
-static void process_symbol(struct MakeRe *const make, const char byte) {
-	
+static void repeat(struct MakeRe *const make, int low, int high) {
+	assert(make && low >= 0 && (high == -1 || low < high));
+}
+
+/** Clears all memory and resets {make}. */
+static void MakeRe_(struct MakeRe *const make) {
+	if(!make) return;
+	PairStack_(&make->pairs);
+	make->is_in_text = 0;
 }
 
 /** Initialises {make} and clears {states}. */
-static void MakeRe(struct MakeRe *const make, struct StateStack *states) {
+static void MakeRe(struct MakeRe *const make, struct StateStack *const states) {
 	assert(make && states);
 	make->states = states;
 	PairStack(&make->pairs);
 	make->is_in_text = 0;
 	StateStackClear(states);
 }
+
+/* {Regex} uses {State}. */
+struct Regex {
+	struct StateStack states;
+};
 
 /** \url{ https://swtch.com/~rsc/regexp/regexp1.html }.
  @param re: A valid {Regex}; will be erased.
@@ -499,6 +527,7 @@ static int re_compile(struct Regex *const re, const char *const compile) {
 	struct MakeRe make;
 	int is_done = 0, is_escape = 0;
 	const char *byte;
+	printf("<<re_compile:\n");
 	assert(re && compile);
 	MakeRe(&make, &re->states);
 	/* Compile char by char. */
@@ -516,17 +545,20 @@ static int re_compile(struct Regex *const re, const char *const compile) {
 		}
 		switch(*byte) {
 		case '\\': is_escape = 1; break;
-		case '*':
-		case '+':
-		case '?': process_symbol(&make, *byte); break;
-		case '(': make.is_in_text = 0;
-		case ')': break;
 		case '|': break;
+		case '*': repeat(&make, 0, -1); break;
+		case '+': repeat(&make, 1, -1); break;
+		case '?': repeat(&make, 0,  1); break;
+		/* @fixme case '{', '}'' */
+		case '(': /*make.pairs @fixme */
+		case ')': make.is_in_text = 0; break;
 		case '\0': is_done = 1; break;
 		default: if(!add_state(&make, *byte)) return 0; break;
 		}
 		if(is_done) break;
 	}
+	printf("\nre_compile>>\n");
+	MakeRe_(&make);
 	return 1;
 }
 
