@@ -376,6 +376,23 @@ struct String *StringTransform(struct String *const string, const char *fmt) {
 
 
 
+/* @fixme regex.h _POSIX_C_SOURCE defines
+ regmatch_t { regoff_t rm_so, rm_eo };
+ one should be able to r = regexec(regex, StringGet(x), nmatch, matches, 0)
+ and then StringReplace(x, matches[0].rm_so, matches[0].rm_eo, "");
+ as well, char *StringSubstring(x, matches[1].rm_so, matches[1].rm_eo) which
+ returns an malloc'ed copy. */
+
+
+
+
+
+
+
+
+
+
+
 #include <stdio.h>
 
 /*typedef int (*Match)(char *const, struct State *const);
@@ -453,7 +470,7 @@ static int StateMatch(struct State *const state, const char match) {
 }
 
 /* Temporary variable when compiling a {Regex}; indexes into {StateStack}. */
-struct Pair { size_t from, to; };
+struct Pair { size_t from, to; /* closed? lookahed? */ };
 #define STACK_NAME Pair
 #define STACK_TYPE struct Pair
 #include "Stack.h"
